@@ -1,289 +1,166 @@
-import React, { useState, useEffect } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { Calendar, Users, ArrowLeftRight, Bell, Info, Loader2, Edit3, Check } from 'lucide-react';
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>寒假值日行事曆</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-// Firebase 配置
-const firebaseConfig = JSON.parse(__firebase_config);
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'winter-vacation-2025';
+  <!-- Firebase SDK & App Logic -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getFirestore, collection, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-// 設定新的日期範圍
-const WINTER_START = new Date('2025-01-26');
-const WINTER_END = new Date('2025-02-22');
+    /**
+     * ⚠️ 重要說明（避免 Firestore Runtime Error）
+     * 1. 請務必填入正確的 Firebase 設定，否則 Firestore 會直接拋錯
+     * 2. 所有 DOM 操作都放在 DOMContentLoaded 之後，避免抓到 null
+     * 3. documentId 使用 YYYY-MM-DD（合法且穩定）
+     */
 
-// 更新值日生名單
-const initialDutyStaff = ["李通", "婉惠", "淑美", "淑芬", "怡芳", "俊平", "虹蓁"];
-
-// 預設活動
-const defaultEvents = {
-  "2025-01-27": "春節假期 (初三)",
-  "2025-01-28": "春節假期 (初四)",
-  "2025-02-11": "學期準備會議",
-  "2025-02-12": "開學日"
-};
-
-const App = () => {
-  const [user, setUser] = useState(null);
-  const [calendarData, setCalendarData] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [swapTarget, setSwapTarget] = useState(null);
-  const [notifications, setNotifications] = useState([]);
-  const [editingId, setEditingId] = useState(null);
-  const [editValue, setEditValue] = useState("");
-
-  // 1. 初始化驗證
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error("Auth error:", error);
-      }
+    const firebaseConfig = {
+      apiKey: "YOUR_API_KEY",
+      authDomain: "YOUR_AUTH_DOMAIN",
+      projectId: "YOUR_PROJECT_ID",
     };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-    });
-    return () => unsubscribe();
-  }, []);
 
-  // 2. 監聽資料庫
-  useEffect(() => {
-    if (!user) return;
-
-    const calendarDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'calendar_storage', 'global_state_v2');
-
-    const unsubscribe = onSnapshot(calendarDocRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setCalendarData(docSnap.data().items || []);
-      } else {
-        const items = [];
-        let curr = new Date(WINTER_START);
-        let staffIdx = 0;
-
-        while (curr <= WINTER_END) {
-          const dateStr = curr.toISOString().split('T')[0];
-          const dayOfWeek = curr.toLocaleDateString('zh-TW', { weekday: 'long' });
-          
-          items.push({
-            id: dateStr,
-            date: dateStr,
-            weekday: dayOfWeek,
-            staff: initialDutyStaff[staffIdx % initialDutyStaff.length],
-            event: defaultEvents[dateStr] || "一般值日"
-          });
-
-          curr.setDate(curr.getDate() + 1);
-          staffIdx++;
-        }
-        setDoc(calendarDocRef, { items });
-      }
-      setLoading(false);
-    }, (error) => {
-      console.error("Firestore error:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  const addNotification = (msg) => {
-    const id = Date.now();
-    setNotifications(prev => [{ id, msg }, ...prev]);
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 4000);
-  };
-
-  const updateDatabase = async (newData) => {
-    const calendarDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'calendar_storage', 'global_state_v2');
-    await setDoc(calendarDocRef, { items: newData });
-  };
-
-  const handleSwap = async (targetId) => {
-    if (!swapTarget) {
-      setSwapTarget(targetId);
-      addNotification("請點擊另一位值日生進行對調");
-    } else {
-      if (swapTarget === targetId) {
-        setSwapTarget(null);
+    document.addEventListener('DOMContentLoaded', () => {
+      // ===== 基本防呆檢查 =====
+      if (!firebaseConfig.apiKey || firebaseConfig.apiKey === 'YOUR_API_KEY') {
+        alert('Firebase 尚未設定完成，請先填入 firebaseConfig');
         return;
       }
-      const newData = [...calendarData];
-      const idx1 = newData.findIndex(i => i.id === swapTarget);
-      const idx2 = newData.findIndex(i => i.id === targetId);
 
-      const tempStaff = newData[idx1].staff;
-      newData[idx1].staff = newData[idx2].staff;
-      newData[idx2].staff = tempStaff;
+      const app = initializeApp(firebaseConfig);
+      const db = getFirestore(app);
 
-      try {
-        await updateDatabase(newData);
-        addNotification(`已將 ${newData[idx1].date} 與 ${newData[idx2].date} 的值日生對調`);
-      } catch (e) {
-        addNotification("更新失敗");
+      const startDate = new Date('2025-01-26');
+      const endDate = new Date('2025-02-22');
+
+      const staffList = ['李通','婉惠','淑美','淑芬','怡芳','俊平','虹蓁'];
+      const tbody = document.getElementById('calendar-body');
+      const notifyEl = document.getElementById('notify');
+
+      function formatDate(d) {
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`; // ✅ Firestore 合法 documentId
       }
-      setSwapTarget(null);
+
+      // ===== 簡單自我測試（避免隱性錯誤） =====
+      console.assert(formatDate(new Date('2025-01-26')) === '2025-01-26', 'formatDate 測試失敗');
+
+      function renderRow(date, data = {}) {
+        const day = date.getDay();
+        const isWeekend = day === 0 || day === 6;
+        const id = formatDate(date);
+
+        const tr = document.createElement('tr');
+        if (isWeekend) tr.classList.add('weekend');
+
+        tr.innerHTML = `
+          <td>${id}<br>（星期${['日','一','二','三','四','五','六'][day]}）</td>
+          <td><input class="task" value="${data.task || ''}" placeholder="輸入工作項目" /></td>
+          <td>
+            <select class="staff">
+              <option value="">-- 請選擇 --</option>
+              ${staffList.map(s => `<option value="${s}" ${data.staff === s ? 'selected' : ''}>${s}</option>`).join('')}
+            </select>
+          </td>
+        `;
+
+        const taskInput = tr.querySelector('.task');
+        const staffSelect = tr.querySelector('.staff');
+
+        const saveHandler = () => save(id, taskInput.value, staffSelect.value);
+        taskInput.addEventListener('change', saveHandler);
+        staffSelect.addEventListener('change', saveHandler);
+
+        tbody.appendChild(tr);
+      }
+
+      async function save(id, task, staff) {
+        try {
+          await setDoc(doc(db, 'calendar', id), {
+            task: task || '',
+            staff: staff || ''
+          }, { merge: true });
+        } catch (err) {
+          console.error('Firestore 寫入失敗', err);
+          alert('資料儲存失敗，請確認 Firestore 權限設定');
+        }
+      }
+
+      // ===== 即時同步 =====
+      try {
+        onSnapshot(collection(db, 'calendar'), snapshot => {
+          tbody.innerHTML = '';
+          const dataMap = {};
+          snapshot.forEach(d => dataMap[d.id] = d.data());
+
+          for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            renderRow(new Date(d), dataMap[formatDate(d)]);
+          }
+
+          notifyEl.classList.add('show');
+          setTimeout(() => notifyEl.classList.remove('show'), 1500);
+        });
+      } catch (err) {
+        console.error('Firestore 監聽失敗', err);
+        alert('Firestore 即時同步初始化失敗，請檢查專案與安全規則');
+      }
+    });
+  </script>
+
+  <style>
+    body {
+      font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+      background: #f9fafb;
+      margin: 0;
+      padding: 20px;
     }
-  };
-
-  const startEdit = (item) => {
-    setEditingId(item.id);
-    setEditValue(item.event);
-  };
-
-  const saveEdit = async (id) => {
-    const newData = calendarData.map(item => 
-      item.id === id ? { ...item, event: editValue } : item
-    );
-    try {
-      await updateDatabase(newData);
-      setEditingId(null);
-      addNotification("內容已更新");
-    } catch (e) {
-      addNotification("儲存失敗");
+    h1 { text-align: center; margin-bottom: 16px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      box-shadow: 0 4px 12px rgba(0,0,0,.08);
     }
-  };
+    th, td {
+      border: 1px solid #e5e7eb;
+      padding: 10px;
+      text-align: center;
+    }
+    th { background: #f1f5f9; }
+    tr.weekend { background: #fee2e2; }
+    input, select { width: 95%; padding: 6px; }
+    #notify {
+      position: fixed;
+      top: 12px;
+      right: 12px;
+      background: #2563eb;
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: 999px;
+      opacity: 0;
+      transition: .3s;
+    }
+    #notify.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <h1>寒假值日行事曆（即時同步）</h1>
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
-        <Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
-        <p className="text-slate-600">正在同步行事曆...</p>
-      </div>
-    );
-  }
+  <table>
+    <thead>
+      <tr>
+        <th>年月日（星期）</th>
+        <th>工作項目</th>
+        <th>值日人員</th>
+      </tr>
+    </thead>
+    <tbody id="calendar-body"></tbody>
+  </table>
 
-  return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8 font-sans text-slate-800">
-      <header className="max-w-6xl mx-auto mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold text-blue-800 flex items-center gap-3">
-            <Calendar className="w-9 h-9" />
-            2025 寒假值日排班表
-          </h1>
-          <p className="text-slate-500 mt-1">日期範圍：1/26 至 2/22 | 點擊工作項目可直接編輯</p>
-        </div>
-        <div className="bg-white px-4 py-2 border rounded-full text-xs text-slate-400 shadow-sm flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-          雲端即時連線中
-        </div>
-      </header>
-
-      {/* 通知 */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
-        {notifications.map(n => (
-          <div key={n.id} className="bg-slate-900 text-white shadow-2xl p-4 rounded-xl flex items-center gap-3 animate-in slide-in-from-bottom-4">
-            <Bell className="w-4 h-4 text-blue-400" />
-            <span className="text-sm font-medium">{n.msg}</span>
-          </div>
-        ))}
-      </div>
-
-      <main className="max-w-6xl mx-auto">
-        <div className="bg-white shadow-2xl rounded-3xl overflow-hidden border border-slate-200">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr className="text-slate-500 text-sm uppercase tracking-wider">
-                  <th className="p-5 font-bold">日期 / 星期</th>
-                  <th className="p-5 font-bold">辦理工作項目或活動 (可編輯)</th>
-                  <th className="p-5 font-bold">值日人員</th>
-                  <th className="p-5 font-bold text-center">排班操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {calendarData.map((item) => {
-                  const isSelected = swapTarget === item.id;
-                  const isWeekend = item.weekday.includes("六") || item.weekday.includes("日");
-                  const isEditing = editingId === item.id;
-                  
-                  return (
-                    <tr key={item.id} className={`group transition-all ${isWeekend ? 'bg-red-50/20' : ''} ${isSelected ? 'bg-blue-50' : 'hover:bg-slate-50/80'}`}>
-                      <td className="p-5">
-                        <div className="font-bold text-slate-800">{item.date}</div>
-                        <div className={`text-xs mt-1 font-medium ${isWeekend ? 'text-red-500' : 'text-slate-400'}`}>{item.weekday}</div>
-                      </td>
-                      <td className="p-5">
-                        {isEditing ? (
-                          <div className="flex items-center gap-2">
-                            <input 
-                              autoFocus
-                              className="flex-1 border-2 border-blue-500 rounded-lg px-3 py-1 text-sm focus:outline-none shadow-inner"
-                              value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
-                              onKeyDown={(e) => e.key === 'Enter' && saveEdit(item.id)}
-                            />
-                            <button onClick={() => saveEdit(item.id)} className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
-                              <Check className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ) : (
-                          <div 
-                            onClick={() => startEdit(item)}
-                            className="flex items-center gap-2 cursor-pointer group-hover:text-blue-600 transition-colors"
-                          >
-                            <span className="text-slate-700">{item.event}</span>
-                            <Edit3 className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-5">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold shadow-sm ${isWeekend ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-700'}`}>
-                            {item.staff[0]}
-                          </div>
-                          <span className="font-bold text-slate-700">{item.staff}</span>
-                        </div>
-                      </td>
-                      <td className="p-5 text-center">
-                        <button
-                          onClick={() => handleSwap(item.id)}
-                          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all border ${
-                            isSelected 
-                            ? 'bg-blue-600 text-white border-blue-600 shadow-lg scale-105' 
-                            : 'bg-white border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50/50'
-                          }`}
-                        >
-                          <ArrowLeftRight className="w-4 h-4 inline-block mr-1" />
-                          {isSelected ? '選取中' : '對調'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <footer className="mt-10 mb-20 text-center">
-          <div className="inline-flex items-center gap-6 bg-white px-8 py-4 rounded-2xl border border-slate-200 shadow-sm text-sm text-slate-500">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-red-100 border border-red-200"></span>
-              <span>紅色標記：週末假日</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-blue-100 border border-blue-200"></span>
-              <span>藍色標記：值日人員</span>
-            </div>
-            <div className="flex items-center gap-2 text-blue-600 font-bold">
-              <Edit3 className="w-4 h-4" />
-              <span>點擊內容文字可修改</span>
-            </div>
-          </div>
-        </footer>
-      </main>
-    </div>
-  );
-};
-
-export default App;
+  <div id="notify">資料已同步更新</div>
+</body>
+</html>
